@@ -116,7 +116,8 @@ function showAgentInstructions(agent, skillName, destPath) {
       log(`${colors.dim}The skill is now available in Amp.${colors.reset}`);
       break;
     case 'vscode':
-      log(`${colors.dim}The skill is installed in your project's .vscode/skills/ folder.${colors.reset}`);
+    case 'copilot':
+      log(`${colors.dim}The skill is installed in your project's .github/skills/ folder.${colors.reset}`);
       break;
     case 'project':
       log(`${colors.dim}The skill is installed in .skills/ in your current directory.${colors.reset}`);
