@@ -16,6 +16,7 @@ const AGENT_PATHS = {
   project: path.join(process.cwd(), '.skills'),
   goose: path.join(os.homedir(), '.config', 'goose', 'skills'),
   opencode: path.join(os.homedir(), '.opencode', 'skills'),
+  codex: path.join(os.homedir(), '.codex', 'skills'),
 };
 
 const colors = {
@@ -55,11 +56,30 @@ function getAvailableSkills() {
 function parseArgs(args) {
   const result = { command: null, param: null, agent: 'claude' };
 
+  // List of valid agents for shorthand flags
+  const validAgents = Object.keys(AGENT_PATHS);
+
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--agent' || args[i] === '-a') {
-      result.agent = args[i + 1] || 'claude';
+    const arg = args[i];
+
+    // Handle --agent <name> or -a <name>
+    if (arg === '--agent' || arg === '-a') {
+      let agentValue = args[i + 1] || 'claude';
+      // Strip leading dashes if user passed --cursor instead of cursor
+      agentValue = agentValue.replace(/^-+/, '');
+      result.agent = validAgents.includes(agentValue) ? agentValue : 'claude';
       i++;
-    } else if (!result.command) {
+    }
+    // Handle shorthand flags like --cursor, --amp, --vscode, etc.
+    else if (arg.startsWith('--')) {
+      const potentialAgent = arg.replace(/^--/, '');
+      if (validAgents.includes(potentialAgent)) {
+        result.agent = potentialAgent;
+      } else if (!result.command) {
+        result.command = arg;
+      }
+    }
+    else if (!result.command) {
       result.command = args[i];
     } else if (!result.param) {
       result.param = args[i];
@@ -114,6 +134,9 @@ function showAgentInstructions(agent, skillName, destPath) {
       break;
     case 'amp':
       log(`${colors.dim}The skill is now available in Amp.${colors.reset}`);
+      break;
+    case 'codex':
+      log(`${colors.dim}The skill is now available in Codex.${colors.reset}`);
       break;
     case 'vscode':
     case 'copilot':
@@ -226,12 +249,14 @@ ${colors.bold}Agents:${colors.reset}
   ${colors.cyan}copilot${colors.reset}  .github/skills/ (alias for vscode)
   ${colors.cyan}goose${colors.reset}    ~/.config/goose/skills/
   ${colors.cyan}opencode${colors.reset} ~/.opencode/skills/
+  ${colors.cyan}codex${colors.reset}    ~/.codex/skills/
   ${colors.cyan}project${colors.reset}  .skills/ in current directory (portable)
 
 ${colors.bold}Examples:${colors.reset}
   npx ai-agent-skills install frontend-design
   npx ai-agent-skills install frontend-design --agent cursor
-  npx ai-agent-skills install pdf --agent project
+  npx ai-agent-skills install frontend-design --cursor          ${colors.dim}(shorthand)${colors.reset}
+  npx ai-agent-skills install pdf --project
   npx ai-agent-skills search excel
 
 ${colors.bold}More info:${colors.reset}
