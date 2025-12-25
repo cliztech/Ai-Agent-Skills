@@ -764,13 +764,23 @@ function isGitHubUrl(source) {
          !source.startsWith('./') &&
          !source.startsWith('../') &&
          !source.startsWith('/') &&
-         !source.startsWith('~');
+         !source.startsWith('~') &&
+         !isWindowsPath(source);
+}
+
+function isWindowsPath(source) {
+  // Match Windows absolute paths like C:\, D:\, etc.
+  return /^[a-zA-Z]:[\\\/]/.test(source);
 }
 
 function isLocalPath(source) {
-  // Only explicit local paths: ./ or / or ~/
-  // NOT ../ (that's path traversal, should be rejected)
-  return source.startsWith('./') || source.startsWith('/') || source.startsWith('~/');
+  // Explicit local paths: ./ or / or ~/ or Windows paths like C:\
+  // Also accept ../ as local path (will be resolved)
+  return source.startsWith('./') ||
+         source.startsWith('../') ||
+         source.startsWith('/') ||
+         source.startsWith('~/') ||
+         isWindowsPath(source);
 }
 
 function expandPath(p) {

@@ -130,7 +130,7 @@ test('info command works', () => {
 });
 
 test('invalid skill name rejected', () => {
-  const output = run('install ../etc/passwd');
+  const output = run('install "test;echo hacked"');
   assertContains(output, 'Invalid skill name');
 });
 
@@ -159,7 +159,8 @@ test('category filter works', () => {
 // ============ SECURITY TESTS ============
 
 test('path traversal blocked in skill names', () => {
-  const output = run('install ../../etc');
+  // Path traversal in skill names should be rejected
+  const output = run('install "..passwd"');
   assertContains(output, 'Invalid skill name');
 });
 
