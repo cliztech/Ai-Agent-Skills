@@ -1,0 +1,23 @@
+# Development files
+.git
+.github
+.cursor
+.gitignore
+.npmignore
+
+# Test files
+test.js
+
+# Documentation (README is auto-included)
+CONTRIBUTING.md
+CHANGELOG.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo

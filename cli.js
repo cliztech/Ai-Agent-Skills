@@ -202,7 +202,10 @@ function parseArgs(args) {
 
 // ============ SAFE FILE OPERATIONS ============
 
-function copyDir(src, dest, currentSize = { total: 0 }) {
+function copyDir(src, dest, currentSize = { total: 0 }, rootSrc = null) {
+  // Track root source to prevent path escape attacks
+  if (rootSrc === null) rootSrc = src;
+
   try {
     if (fs.existsSync(dest)) {
       fs.rmSync(dest, { recursive: true });
@@ -218,12 +221,25 @@ function copyDir(src, dest, currentSize = { total: 0 }) {
       // Skip unnecessary files/folders
       if (skipList.includes(entry.name)) continue;
 
+      // Skip symlinks to prevent path escape attacks
+      if (entry.isSymbolicLink()) {
+        warn(`Skipping symlink: ${entry.name}`);
+        continue;
+      }
+
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
 
+      // Verify resolved path stays within source directory (prevent path traversal)
+      const resolvedSrc = fs.realpathSync(srcPath);
+      if (!resolvedSrc.startsWith(fs.realpathSync(rootSrc))) {
+        warn(`Skipping file outside source directory: ${entry.name}`);
+        continue;
+      }
+
       if (entry.isDirectory()) {
-        copyDir(srcPath, destPath, currentSize);
-      } else {
+        copyDir(srcPath, destPath, currentSize, rootSrc);
+      } else if (entry.isFile()) {
         const stat = fs.statSync(srcPath);
         currentSize.total += stat.size;
 
@@ -233,6 +249,7 @@ function copyDir(src, dest, currentSize = { total: 0 }) {
 
         fs.copyFileSync(srcPath, destPath);
       }
+      // Skip any other special file types (sockets, devices, etc.)
     }
   } catch (e) {
     // Clean up partial install on failure
@@ -401,7 +418,6 @@ function getInstalledSkills(agent = 'claude') {
 function listInstalledSkills(agent = 'claude') {
   const installed = getInstalledSkills(agent);
   const destDir = AGENT_PATHS[agent] || AGENT_PATHS.claude;
-  const data = loadSkillsJson();
 
   if (installed.length === 0) {
     warn(`No skills installed for ${agent}`);
@@ -412,43 +428,12 @@ function listInstalledSkills(agent = 'claude') {
   log(`\n${colors.bold}Installed Skills${colors.reset} (${installed.length} for ${agent})\n`);
   log(`${colors.dim}Location: ${destDir}${colors.reset}\n`);
 
-  // Check for updates
-  let updatesAvailable = 0;
-
   installed.forEach(name => {
-    const skill = data.skills.find(s => s.name === name);
-    const hasUpdate = skill && skill.lastUpdated && isUpdateAvailable(name, agent, skill.lastUpdated);
-
-    if (hasUpdate) {
-      updatesAvailable++;
-      log(`  ${colors.green}${name}${colors.reset} ${colors.yellow}(update available)${colors.reset}`);
-    } else {
-      log(`  ${colors.green}${name}${colors.reset}`);
-    }
+    log(`  ${colors.green}${name}${colors.reset}`);
   });
 
-  if (updatesAvailable > 0) {
-    log(`\n${colors.yellow}${updatesAvailable} update(s) available.${colors.reset}`);
-    log(`${colors.dim}Run: npx ai-agent-skills update <name> --agent ${agent}${colors.reset}`);
-  }
-
-  log(`\n${colors.dim}Uninstall: npx ai-agent-skills uninstall <name> --agent ${agent}${colors.reset}`);
-}
-
-function isUpdateAvailable(skillName, agent, repoLastUpdated) {
-  // Simple check based on file modification time
-  const destDir = AGENT_PATHS[agent] || AGENT_PATHS.claude;
-  const skillPath = path.join(destDir, skillName, 'SKILL.md');
-
-  try {
-    if (!fs.existsSync(skillPath)) return false;
-    const stat = fs.statSync(skillPath);
-    const installedTime = stat.mtime.getTime();
-    const repoTime = new Date(repoLastUpdated).getTime();
-    return repoTime > installedTime;
-  } catch {
-    return false;
-  }
+  log(`\n${colors.dim}Update:    npx ai-agent-skills update <name> --agent ${agent}${colors.reset}`);
+  log(`${colors.dim}Uninstall: npx ai-agent-skills uninstall <name> --agent ${agent}${colors.reset}`);
 }
 
 function updateSkill(skillName, agent = 'claude', dryRun = false) {
@@ -795,8 +780,23 @@ function expandPath(p) {
   return path.resolve(p);
 }
 
+// Validate GitHub owner/repo names (alphanumeric, hyphens, underscores, dots)
+function validateGitHubName(name, type = 'name') {
+  if (!name || typeof name !== 'string') {
+    throw new Error(`Invalid GitHub ${type}`);
+  }
+  // GitHub allows: alphanumeric, hyphens, underscores, dots (no leading/trailing dots for repos)
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) {
+    throw new Error(`Invalid GitHub ${type}: "${name}" contains invalid characters`);
+  }
+  if (name.length > 100) {
+    throw new Error(`GitHub ${type} too long: ${name.length} > 100 characters`);
+  }
+  return true;
+}
+
 async function installFromGitHub(source, agent = 'claude', dryRun = false) {
-  const { execSync } = require('child_process');
+  const { execFileSync } = require('child_process');
 
   // Parse owner/repo format
   const parts = source.split('/');
@@ -808,6 +808,18 @@ async function installFromGitHub(source, agent = 'claude', dryRun = false) {
   const owner = parts[0];
   const repo = parts[1];
   const skillName = parts[2]; // Optional specific skill
+
+  // Validate owner and repo to prevent injection attacks
+  try {
+    validateGitHubName(owner, 'owner');
+    validateGitHubName(repo, 'repository');
+    if (skillName) {
+      validateSkillName(skillName);
+    }
+  } catch (e) {
+    error(e.message);
+    return false;
+  }
 
   const repoUrl = `https://github.com/${owner}/${repo}.git`;
   const tempDir = path.join(os.tmpdir(), `ai-skills-${Date.now()}`);
@@ -822,7 +834,8 @@ async function installFromGitHub(source, agent = 'claude', dryRun = false) {
 
   try {
     info(`Cloning ${owner}/${repo}...`);
-    execSync(`git clone --depth 1 ${repoUrl} ${tempDir}`, { stdio: 'pipe' });
+    // Use execFileSync with args array to prevent shell injection
+    execFileSync('git', ['clone', '--depth', '1', repoUrl, tempDir], { stdio: 'pipe' });
 
     // Find skills in the cloned repo
     const skillsDir = fs.existsSync(path.join(tempDir, 'skills'))
@@ -853,7 +866,17 @@ async function installFromGitHub(source, agent = 'claude', dryRun = false) {
       info(`Location: ${destPath}`);
     } else if (isRootSkill) {
       // Repo itself is a single skill
-      const skillName = repo;
+      // Sanitize repo name to valid skill name (lowercase, alphanumeric + hyphens)
+      const skillName = repo.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+      try {
+        validateSkillName(skillName);
+      } catch (e) {
+        error(`Cannot install: repo name "${repo}" cannot be converted to valid skill name`);
+        fs.rmSync(tempDir, { recursive: true });
+        return false;
+      }
+
       const destDir = AGENT_PATHS[agent] || AGENT_PATHS.claude;
       const destPath = path.join(destDir, skillName);
 
