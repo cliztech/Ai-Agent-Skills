@@ -5,7 +5,7 @@
 </h1>
 
 <p align="center">
-  <strong>Homebrew for AI agent skills.</strong><br>
+  <strong>Homebrew for AI Agent Skills.</strong><br>
   Universal Skills installer for any agent that follows the open standard spec 
 </p>
 
